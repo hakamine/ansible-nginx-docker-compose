@@ -1,0 +1,10 @@
+---
+# defaults file for ansible-nginx-docker-compose
+
+# Directory to install compose file and config files
+nginxdc_compose_cfg_dir: "/etc/compose/nginx"
+
+# docker external volumes
+nginxdc_ext_volumes:
+    - name: "nginx-web-root"
+      path: "/var/compose/nginx/web-root"

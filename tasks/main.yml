@@ -1,0 +1,109 @@
+---
+# tasks file for ansible-nginx-docker-compose
+
+- name: "Install dependencies required by this role"
+  package:
+    name: "{{ item }}"
+  loop:
+    - docker
+    - docker-compose
+
+- name: "Block: Host user creation"
+  block:
+    - name: "Set fact: users (to create required users in host)"
+      set_fact:
+        nginxdc_fact_users:
+          - { name: 'nginx', 
+              system: 'yes', 
+              home: '/nonexistent', 
+              create_home: 'no', 
+              shell: '/bin/false'}
+
+    - name: "Create required users in host"
+      user:
+        name: "{{ item.name }}"
+        uid: "{{ item.uid | default(omit) }}"
+        system: "{{ item.system | default(omit) }}"
+        home: "{{ item.home | default(omit) }}"
+        create_home: "{{ item.create_home | default(omit) }}"
+        shell: "{{ item.shell | default(omit) }}"
+      loop: "{{ nginxdc_fact_users }}"
+
+    - name: "Get uid from required users"
+      command: id -u {{ item.name }}
+      loop: "{{ nginxdc_fact_users }}"
+      register: nginxdc_fact_uids
+
+    # the following will create a dictionary with uid information
+    # so for example to get the uid of the nginx user we can do:
+    # {{ nginxdc_fact_uids_dict['nginx'] }}
+    - name: "Create dictionary with uid information"
+      set_fact:
+        nginxdc_fact_uids_dict: "{{ nginxdc_fact_uids_dict|default({}) | combine( {item.item.name: item.stdout} ) }}"
+      loop: "{{ nginxdc_fact_uids.results }}"
+  tags:
+    - nginxdc-users
+
+- name: "Create directories in host for config files"
+  file:
+    name: "{{ nginxdc_compose_cfg_dir }}/{{ item }}"
+    state: directory
+  loop:
+        - "nginx/conf.d"
+
+- name: "Create docker compose file from template"
+  template:
+    src: "docker-compose.yml.j2"
+    dest: "{{ nginxdc_compose_cfg_dir }}/docker-compose.yml"
+  tags: nginxdc-compose-template
+
+- name: "Create nginx main configuration from template"
+  template:
+    src: "nginx/nginx.conf"
+    dest: "{{ nginxdc_compose_cfg_dir }}/nginx/nginx.conf"
+  tags: nginxdc-nginx-template
+
+- name: "Create nginx sites configuration from templates"
+  template:
+    src: "{{ item }}"
+    dest: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
+  loop: "{{ lookup('fileglob', 'templates/nginx/conf.d/*', wantlist=True) }}"
+  tags: nginxdc-nginx-template
+
+- name: "Block: volumes"
+  block:
+    - name: "Check if paths used for docker volume exist"
+      stat:
+        path: "{{ item.path }}"
+      register: st
+      loop: "{{ nginxdc_ext_volumes }}"
+
+    - name: "Create paths used for docker volumes if needed"
+      file:
+        path: "{{ item.item.path }}"
+        state: "directory"
+        owner: "{{ nginxdc_fact_uids_dict['nginx'] }}"
+        mode: '644'
+      when: item.stat.exists is not defined or not(item.stat.exists)
+      loop: "{{ st.results }}"
+
+    # Create docker volumes as bind mounts
+    # (i.e., all directories created beforehand, 
+    #  all  NFS/CIFS/etc volumes mounted beforehand )
+    - name: "Create docker volumes"
+      docker_volume:
+        name: "{{ item.name }}"
+        driver_options:
+          type: "none"
+          o: "bind"
+          device: "{{ item.path }}"
+      loop: "{{ nginxdc_ext_volumes }}"
+  tags: nginxdc-volumes
+
+
+- name: "Start docker compose and build"
+  docker_compose:
+    project_src: "{{ nginxdc_compose_cfg_dir }}"
+    build: yes
+  tags: nginxdc-compose-build
+
