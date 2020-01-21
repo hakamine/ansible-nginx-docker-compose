@@ -4,7 +4,20 @@
 # Directory to install compose file and config files
 nginxdc_compose_cfg_dir: "/etc/compose/nginx"
 
+# template for /etc/nginx/nginx.conf
+# (to override, use a file with a different path/name, target will 
+#  always be /etc/nginx/nginx.conf in the nginx container)
+nginxdc_nginx_conf_template: "nginx/nginx.conf"
+
+# templates for /etc/nginx.d/
+# (to override, use a list of files with different path/names, target
+#  files will be copied to /etc/nginx/nginx.d/ using the basename )
+nginxdc_nginx_conf_d_templates:
+  - "nginx/conf.d/default-tls.conf"
+
 # docker external volumes
 nginxdc_ext_volumes:
     - name: "nginx-web-root"
       path: "/var/compose/nginx/web-root"
+    - name: "nginx-selfsigned"
+      path: "/var/compose/nginx/selfsigned"

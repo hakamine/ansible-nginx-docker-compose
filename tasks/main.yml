@@ -59,15 +59,15 @@
 
 - name: "Create nginx main configuration from template"
   template:
-    src: "nginx/nginx.conf"
+    src: "{{ nginxdc_nginx_conf_template }}.j2"
     dest: "{{ nginxdc_compose_cfg_dir }}/nginx/nginx.conf"
   tags: nginxdc-nginx-template
 
 - name: "Create nginx sites configuration from templates"
   template:
-    src: "{{ item }}"
+    src: "{{ item }}.j2"
     dest: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
-  loop: "{{ lookup('fileglob', 'templates/nginx/conf.d/*', wantlist=True) }}"
+  loop: "{{ nginxdc_nginx_conf_d_templates }}"
   tags: nginxdc-nginx-template
 
 - name: "Block: volumes"
@@ -100,6 +100,19 @@
       loop: "{{ nginxdc_ext_volumes }}"
   tags: nginxdc-volumes
 
+- name: "create self signed certificate for default config"
+  command: |
+    openssl req -x509 -nodes -newkey rsa:1024 -days 3650 \
+    -keyout '/var/compose/nginx/selfsigned/selfsigned.pem' \
+    -out '/var/compose/nginx/selfsigned/selfsigned.crt' \
+    -subj '/CN=localhost'
+  tags: nginxdc-selfsigned
+
+# openssl_certificate:
+#     path: /var/compose/nginx/selfsigned/selfsigned.crt
+#     privatekey_path: /var/compose/nginx/selfsigned/selfsigned.pem
+#     csr_path: /var/compose/nginx/selfsigned/selfsigned.csr
+#     provider: selfsigned
 
 - name: "Start docker compose and build"
   docker_compose:

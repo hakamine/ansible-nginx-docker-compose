@@ -6,6 +6,10 @@ volumes:
   nginx_web_root:
     external:
       name: "nginx-web-root"
+  nginx_selfsigned:
+    external:
+      name: "nginx-selfsigned"
+
 
 services:
 
@@ -15,11 +19,12 @@ services:
       restart: unless-stopped
       ports:
         - "80:80"
+        - "443:443"
       volumes:
-        - nginx_web_root:/var/www/html
         - {{ nginxdc_compose_cfg_dir }}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
         - {{ nginxdc_compose_cfg_dir }}/nginx/conf.d:/etc/nginx/conf.d:ro
-
+        - nginx_web_root:/var/www/html
+        - nginx_selfsigned:/etc/ssl/selfsigned
 
 #   nginx:
 #     image: nginx:mainline-alpine
