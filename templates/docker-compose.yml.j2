@@ -1,61 +1,56 @@
 ---
-version: '3'
+version: '3.5'
 
 volumes:
-
-  nginx_web_root:
-    external:
-      name: "nginx-web-root"
-  nginx_selfsigned:
-    external:
-      name: "nginx-selfsigned"
+  # external volumes prevent data loss when containers are destroyed/rebuilt
+  nginx-web-root:
+    external: yes
+    name: nginx-web-root
+  nginx-selfsigned:
+    external: yes
+    name: nginx-selfsigned
+  certbot-etc:
+    external: yes
+    name: certbot-etc
+  certbot-var:
+    external: yes
+    name: certbot-var
 
 
 services:
 
-    nginx:
-      image: nginx:mainline-alpine
-      container_name: nginx
-      restart: unless-stopped
-      ports:
-        - "80:80"
-        - "443:443"
-      volumes:
-        - {{ nginxdc_compose_cfg_dir }}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-        - {{ nginxdc_compose_cfg_dir }}/nginx/conf.d:/etc/nginx/conf.d:ro
-        - nginx_web_root:/var/www/html
-        - nginx_selfsigned:/etc/ssl/selfsigned
+  nginx:
+    image: nginx:mainline-alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - {{ nginxdc_compose_cfg_dir }}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - {{ nginxdc_compose_cfg_dir }}/nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx-web-root:/var/www/html
+      - nginx-selfsigned:/etc/ssl/selfsigned
+      - certbot-etc:/etc/letsencrypt
+      - certbot-var:/var/lib/letsencrypt
 
-#   nginx:
-#     image: nginx:mainline-alpine
-#     container_name: nginx
-#     restart: unless-stopped
-#     ports:
-#       - "80:80"
-#     volumes:
-#       - web-root:/var/www/html
-#       - ./nginx-conf:/etc/nginx/conf.d
-#       - certbot-etc:/etc/letsencrypt
-#       - certbot-var:/var/lib/letsencrypt
-#     depends_on:
-#       - nodejs
-#     networks:
-#       - app-network
-
-#   certbot:
-#     image: certbot/certbot
-#     container_name: certbot
-#     volumes:
-#       - certbot-etc:/etc/letsencrypt
-#       - certbot-var:/var/lib/letsencrypt
-#       - web-root:/var/www/html
-#     depends_on:
-#       - webserver
-#     command: >
-#         certonly --webroot 
-#         --webroot-path=/var/www/html 
-#         --email sammy@example.com 
-#         --agree-tos 
-#         --no-eff-email 
-#         --staging 
-#         -d example.com  -d www.example.com 
+# certbot container won't do anything when started unless a command is 
+# specified (it will just invoke certbot command without args and exit)
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - certbot-etc:/etc/letsencrypt
+      - certbot-var:/var/lib/letsencrypt
+      - nginx-web-root:/var/www/html
+      - nginx-selfsigned:/etc/ssl/selfsigned
+    depends_on:
+      - nginx
+    # command: |
+    #     certonly --webroot \ 
+    #     --webroot-path=/var/www/html \ 
+    #     --email sammy@example.com \
+    #     --agree-tos \
+    #     --no-eff-email \
+    #     --staging \
+    #     -d example.com  -d www.example.com 

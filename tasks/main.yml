@@ -63,12 +63,14 @@
     dest: "{{ nginxdc_compose_cfg_dir }}/nginx/nginx.conf"
   tags: nginxdc-nginx-template
 
-- name: "Create nginx sites configuration from templates"
+# TODO: may need a step to remove/rename pre-existing site config
+
+- name: "Create temporal nginx sites configuration"
   template:
     src: "{{ item }}.j2"
     dest: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
-  loop: "{{ nginxdc_nginx_conf_d_templates }}"
-  tags: nginxdc-nginx-template
+  loop: "{{ nginxdc_nginx_conf_d_temp_templates }}"
+  tags: nginxdc-nginx-temp-site-template
 
 - name: "Block: volumes"
   block:
@@ -83,7 +85,7 @@
         path: "{{ item.item.path }}"
         state: "directory"
         owner: "{{ nginxdc_fact_uids_dict['nginx'] }}"
-        mode: '644'
+        mode: '755'
       when: item.stat.exists is not defined or not(item.stat.exists)
       loop: "{{ st.results }}"
 
@@ -100,23 +102,62 @@
       loop: "{{ nginxdc_ext_volumes }}"
   tags: nginxdc-volumes
 
-- name: "create self signed certificate for default config"
-  command: |
-    openssl req -x509 -nodes -newkey rsa:1024 -days 3650 \
-    -keyout '/var/compose/nginx/selfsigned/selfsigned.pem' \
-    -out '/var/compose/nginx/selfsigned/selfsigned.crt' \
-    -subj '/CN=localhost'
+- name: "create self signed certificate using openssl certbot container"
+  shell:
+    cmd: |
+      docker-compose run --rm --entrypoint "\
+      /usr/bin/openssl req -x509 -nodes -newkey rsa:2014 -days 3650 \
+      -keyout '/etc/ssl/selfsigned/selfsigned.pem' \
+      -out '/etc/ssl/selfsigned/selfsigned.crt' \
+      -subj '/CN=localhost'" certbot
+    chdir: "{{ nginxdc_compose_cfg_dir }}"
   tags: nginxdc-selfsigned
 
-# openssl_certificate:
-#     path: /var/compose/nginx/selfsigned/selfsigned.crt
-#     privatekey_path: /var/compose/nginx/selfsigned/selfsigned.pem
-#     csr_path: /var/compose/nginx/selfsigned/selfsigned.csr
-#     provider: selfsigned
+- name: "Get LE certs using certbot"
+  shell:
+    cmd: |
+      docker-compose run --entrypoint "\
+      certbot certonly \
+      --webroot -w /var/www/html \
+      --email {{ nginxdc_le_email }} --no-eff-email \
+      -d {{ nginxdc_le_domains|join(',') }} \
+      --agree-tos {{ '--staging' if nginxdc_le_staging | bool }} \
+      --force-renewal" certbot
+    chdir: "{{ nginxdc_compose_cfg_dir }}"
+  tags: nginxdc-le
 
-- name: "Start docker compose and build"
+- name: "Create final nginx site configuration from templates"
+  template:
+    src: "{{ item }}.j2"
+    dest: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
+  loop: "{{ nginxdc_nginx_conf_d_templates }}"
+  tags: nginxdc-nginx-site-template
+
+- name: "Restart nginx"
   docker_compose:
     project_src: "{{ nginxdc_compose_cfg_dir }}"
-    build: yes
-  tags: nginxdc-compose-build
+    services:
+      - nginx
+    state: present
+    restarted: yes
+  tags: nginxdc-nginx-restart
+
+- name: "Block: configure cron to renew LE certs"
+  block:
+    - name: "Create script to renew cert from template"
+      template:
+        src: "certbot_renew.sh.j2"
+        dest: "{{ nginxdc_compose_cfg_dir }}/certbot_renew.sh"
+        mode: "0755"
+
+    - name: "Add crontab entry to call script to renew cert"
+      cron:
+        name: "certbot renew"
+        minute: "0"
+        hour: "23"
+        day: "*"
+        job: "{{ nginxdc_compose_cfg_dir }}/certbot_renew.sh"
+  tags:
+    - nginxdc-le
+    - nginxdc-le-cron
 

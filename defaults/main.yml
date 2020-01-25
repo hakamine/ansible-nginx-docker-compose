@@ -1,8 +1,11 @@
 ---
 # defaults file for ansible-nginx-docker-compose
 
-# Directory to install compose file and config files
+# Directory for config files used by docker-compose
 nginxdc_compose_cfg_dir: "/etc/compose/nginx"
+
+# Directory for external volumes 
+nginxdc_compose_data_dir: "/var/compose/nginx"
 
 # template for /etc/nginx/nginx.conf
 # (to override, use a file with a different path/name, target will 
@@ -13,11 +16,40 @@ nginxdc_nginx_conf_template: "nginx/nginx.conf"
 # (to override, use a list of files with different path/names, target
 #  files will be copied to /etc/nginx/nginx.d/ using the basename )
 nginxdc_nginx_conf_d_templates:
-  - "nginx/conf.d/default-tls.conf"
+    - "nginx/conf.d/default-tls.conf"
+  
+# temporal template, this is used to obtain LE certs
+nginxdc_nginx_conf_d_temp_templates:
+  - "nginx/conf.d/default-tls-selfsigned.conf"
+
+## template config parameters
+nginxdc_nginx_template_default_ssl_cert : "/etc/letsencrypt/live/example.com/fullchain.pem"
+nginxdc_nginx_template_default_ssl_cert_key : "/etc/letsencrypt/live/example.com/privkey.pem"
+
 
 # docker external volumes
 nginxdc_ext_volumes:
     - name: "nginx-web-root"
-      path: "/var/compose/nginx/web-root"
+      path: "{{ nginxdc_compose_data_dir }}/web-root"
     - name: "nginx-selfsigned"
-      path: "/var/compose/nginx/selfsigned"
+      path: "{{ nginxdc_compose_data_dir }}/selfsigned"
+    - name: "certbot-etc"
+      path: "{{ nginxdc_compose_data_dir }}/certbot-etc"
+    - name: "certbot-var"
+      path: "{{ nginxdc_compose_data_dir }}/certbot-var"
+
+## Let's Encrypt (LE)
+# nginxdc_le_enable: set to yes to obtain LE certs
+# (requires DNS entries for the server are set up beforehand) 
+# default is no (deploy self-signed cert only)
+nginxdc_le_enable: no
+
+# nginxdc_le_domains: list of domains from which to obtain LE certs
+nginxdc_le_domains:
+    - www.example.com
+    - example.com
+
+# nginxdc_le_staging: use LE staging environment(test certificates)
+nginxdc_le_staging: no
+
+nginxdc_le_email: myemail@example.com

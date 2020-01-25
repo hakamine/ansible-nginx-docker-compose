@@ -3,8 +3,8 @@ server {
     listen [::]:443 ssl;
 
     # self signed certificates
-    ssl_certificate {{ nginxdc_nginx_template_default_ssl_cert }};
-    ssl_certificate_key {{ nginxdc_nginx_template_default_ssl_cert_key }};
+    ssl_certificate /etc/ssl/selfsigned/selfsigned.crt;
+    ssl_certificate_key /etc/ssl/selfsigned/selfsigned.pem;
 
     # SSL parameters
     ssl_protocols TLSv1.2;
