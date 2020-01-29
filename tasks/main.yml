@@ -63,7 +63,19 @@
     dest: "{{ nginxdc_compose_cfg_dir }}/nginx/nginx.conf"
   tags: nginxdc-nginx-template
 
-# TODO: may need a step to remove/rename pre-existing site config
+- name: "Block: disable existing nginx site config"
+  block:
+    - name: "Get list site config files"
+      find:
+        paths: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d"
+        patterns: "*.conf"
+      register: fi
+
+    - name: "Disable site config files (add .old and timestamp to file name)"
+      command:
+        cmd: "mv -v {{ item.path }} {{ item.path }}.old.{{ ansible_date_time.epoch }}"
+      loop: "{{ fi.files }}"
+  tags: nginxdc-nginx-site-templates-remove
 
 - name: "Create temporal nginx sites configuration"
   template:
@@ -116,48 +128,63 @@
 - name: "Get LE certs using certbot"
   shell:
     cmd: |
-      docker-compose run --entrypoint "\
+      docker-compose run --rm --entrypoint "\
       certbot certonly \
       --webroot -w /var/www/html \
       --email {{ nginxdc_le_email }} --no-eff-email \
       -d {{ nginxdc_le_domains|join(',') }} \
-      --agree-tos {{ '--staging' if nginxdc_le_staging | bool }} \
+      --agree-tos {{ '--staging' if (nginxdc_le_staging | bool) else '' }} \
       --force-renewal" certbot
     chdir: "{{ nginxdc_compose_cfg_dir }}"
   tags: nginxdc-le
+
+- name: "Remove temporal nginx sites configuration"
+  file:
+    path: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
+    state: absent
+  loop: "{{ nginxdc_nginx_conf_d_temp_templates }}"
+  tags: nginxdc-nginx-temp-site-template-remove
 
 - name: "Create final nginx site configuration from templates"
   template:
     src: "{{ item }}.j2"
     dest: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
   loop: "{{ nginxdc_nginx_conf_d_templates }}"
-  tags: nginxdc-nginx-site-template
+  tags: nginxdc-nginx-site-templates-create
 
-- name: "Restart nginx"
+# - name: "Restart nginx"
+#   docker_compose:
+#     project_src: "{{ nginxdc_compose_cfg_dir }}"
+#     services:
+#       - nginx
+#     state: present
+#     restarted: yes
+#   tags: nginxdc-nginx-restart
+
+- name: "Start all compose services"
   docker_compose:
     project_src: "{{ nginxdc_compose_cfg_dir }}"
-    services:
-      - nginx
     state: present
     restarted: yes
-  tags: nginxdc-nginx-restart
+  tags: nginxdc-compose-restart
 
-- name: "Block: configure cron to renew LE certs"
-  block:
-    - name: "Create script to renew cert from template"
-      template:
-        src: "certbot_renew.sh.j2"
-        dest: "{{ nginxdc_compose_cfg_dir }}/certbot_renew.sh"
-        mode: "0755"
 
-    - name: "Add crontab entry to call script to renew cert"
-      cron:
-        name: "certbot renew"
-        minute: "0"
-        hour: "23"
-        day: "*"
-        job: "{{ nginxdc_compose_cfg_dir }}/certbot_renew.sh"
-  tags:
-    - nginxdc-le
-    - nginxdc-le-cron
+# - name: "Block: configure cron to renew LE certs"
+#   block:
+#     - name: "Create script to renew cert from template"
+#       template:
+#         src: "certbot_renew.sh.j2"
+#         dest: "{{ nginxdc_compose_cfg_dir }}/certbot_renew.sh"
+#         mode: "0755"
+
+#     - name: "Add crontab entry to call script to renew cert"
+#       cron:
+#         name: "certbot renew"
+#         minute: "0"
+#         hour: "23"
+#         day: "*"
+#         job: "{{ nginxdc_compose_cfg_dir }}/certbot_renew.sh"
+#   tags:
+#     - nginxdc-le
+#     - nginxdc-le-cron
 
