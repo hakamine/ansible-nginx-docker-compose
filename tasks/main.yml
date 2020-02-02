@@ -55,13 +55,13 @@
   template:
     src: "docker-compose.yml.j2"
     dest: "{{ nginxdc_compose_cfg_dir }}/docker-compose.yml"
-  tags: nginxdc-compose-template
+  tags: nginxdc-compose-cfg
 
 - name: "Create nginx main configuration from template"
   template:
     src: "{{ nginxdc_nginx_conf_template }}.j2"
     dest: "{{ nginxdc_compose_cfg_dir }}/nginx/nginx.conf"
-  tags: nginxdc-nginx-template
+  tags: nginxdc-nginx-cfg
 
 - name: "Block: disable existing nginx site config"
   block:
@@ -75,14 +75,14 @@
       command:
         cmd: "mv -v {{ item.path }} {{ item.path }}.old.{{ ansible_date_time.epoch }}"
       loop: "{{ fi.files }}"
-  tags: nginxdc-nginx-site-templates-remove
+  tags: nginxdc-nginx-site-cfg-remove
 
 - name: "Create temporal nginx sites configuration"
   template:
     src: "{{ item }}.j2"
     dest: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
   loop: "{{ nginxdc_nginx_conf_d_temp_templates }}"
-  tags: nginxdc-nginx-temp-site-template
+  tags: nginxdc-nginx-temp-site-cfg
 
 - name: "Block: volumes"
   block:
@@ -143,14 +143,14 @@
     path: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
     state: absent
   loop: "{{ nginxdc_nginx_conf_d_temp_templates }}"
-  tags: nginxdc-nginx-temp-site-template-remove
+  tags: nginxdc-nginx-temp-site-cfg-remove
 
 - name: "Create final nginx site configuration from templates"
   template:
     src: "{{ item }}.j2"
     dest: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
   loop: "{{ nginxdc_nginx_conf_d_templates }}"
-  tags: nginxdc-nginx-site-templates-create
+  tags: nginxdc-nginx-site-cfg-create
 
 # - name: "Restart nginx"
 #   docker_compose:
