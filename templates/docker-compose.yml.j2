@@ -2,25 +2,18 @@
 version: '3.5'
 
 volumes:
-  # external volumes prevent data loss when containers are destroyed/rebuilt
-  nginx-web-root:
+  # using external volumes to prevent accidental data loss when containers are destroyed/rebuilt
+{% for vol in nginxdc_ext_volumes %}
+  {{ vol['name'] }}:
     external: yes
-    name: nginx-web-root
-  nginx-selfsigned:
-    external: yes
-    name: nginx-selfsigned
-  certbot-etc:
-    external: yes
-    name: certbot-etc
-  certbot-var:
-    external: yes
-    name: certbot-var
+    name: {{ vol['name'] }}
+{% endfor %}
 
 
 services:
 
   nginx:
-    image: nginx:mainline-alpine
+    image: nginx:1.17.8-alpine
     container_name: nginx
     restart: unless-stopped
     ports:
@@ -29,20 +22,24 @@ services:
     volumes:
       - {{ nginxdc_compose_cfg_dir }}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - {{ nginxdc_compose_cfg_dir }}/nginx/conf.d:/etc/nginx/conf.d:ro
-      - nginx-web-root:/var/www/html
-      - nginx-selfsigned:/etc/ssl/selfsigned
-      - certbot-etc:/etc/letsencrypt
-      - certbot-var:/var/lib/letsencrypt
+      - nginx_var_www_html:{{ nginxdc_fact_vol_dict['nginx_var_www_html']['path_c'] }}
+      - nginx_etc_ssl_sslgen:{{ nginxdc_fact_vol_dict['nginx_etc_ssl_sslgen']['path_c'] }}:ro
+{% if nginxdc_le_enable | bool %}
+      - nginx_etc_letsencrypt:{{ nginxdc_fact_vol_dict['nginx_etc_letsencrypt']['path_c'] }}
+      - nginx_var_lib_letsencrypt:{{ nginxdc_fact_vol_dict['nginx_var_lib_letsencrypt']['path_c'] }}
+{% endif %}
 
+{% if nginxdc_le_enable | bool %}
   certbot:
-    image: certbot/certbot
+    image: certbot/certbot:v1.1.0
     container_name: certbot
     restart: unless-stopped
     volumes:
-      - certbot-etc:/etc/letsencrypt
-      - certbot-var:/var/lib/letsencrypt
-      - nginx-web-root:/var/www/html
-      - nginx-selfsigned:/etc/ssl/selfsigned
+      - nginx_var_www_html:{{ nginxdc_fact_vol_dict['nginx_var_www_html']['path_c'] }}
+      - nginx_etc_ssl_sslgen:{{ nginxdc_fact_vol_dict['nginx_etc_ssl_sslgen']['path_c'] }}:ro
+      - nginx_etc_letsencrypt:{{ nginxdc_fact_vol_dict['nginx_etc_letsencrypt']['path_c'] }}
+      - nginx_var_lib_letsencrypt:{{ nginxdc_fact_vol_dict['nginx_var_lib_letsencrypt']['path_c'] }}
     depends_on:
       - nginx
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h; done;'"
+{% endif %}

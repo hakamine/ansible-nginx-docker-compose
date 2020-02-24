@@ -8,48 +8,27 @@
     - docker
     - docker-compose
 
-- name: "Block: Host user creation"
-  block:
-    - name: "Set fact: users (to create required users in host)"
-      set_fact:
-        nginxdc_fact_users:
-          - { name: 'nginx', 
-              system: 'yes', 
-              home: '/nonexistent', 
-              create_home: 'no', 
-              shell: '/bin/false'}
-
-    - name: "Create required users in host"
-      user:
-        name: "{{ item.name }}"
-        uid: "{{ item.uid | default(omit) }}"
-        system: "{{ item.system | default(omit) }}"
-        home: "{{ item.home | default(omit) }}"
-        create_home: "{{ item.create_home | default(omit) }}"
-        shell: "{{ item.shell | default(omit) }}"
-      loop: "{{ nginxdc_fact_users }}"
-
-    - name: "Get uid from required users"
-      command: id -u {{ item.name }}
-      loop: "{{ nginxdc_fact_users }}"
-      register: nginxdc_fact_uids
-
-    # the following will create a dictionary with uid information
-    # so for example to get the uid of the nginx user we can do:
-    # {{ nginxdc_fact_uids_dict['nginx'] }}
-    - name: "Create dictionary with uid information"
-      set_fact:
-        nginxdc_fact_uids_dict: "{{ nginxdc_fact_uids_dict|default({}) | combine( {item.item.name: item.stdout} ) }}"
-      loop: "{{ nginxdc_fact_uids.results }}"
-  tags:
-    - nginxdc-users
-
 - name: "Create directories in host for config files"
   file:
     name: "{{ nginxdc_compose_cfg_dir }}/{{ item }}"
     state: directory
   loop:
         - "nginx/conf.d"
+
+# This will create a dict from nginxdc_ext_volumes
+# so that we can get elements using the volume name as a key
+# e.g. to get the host path: 
+#  nginxdc_fact_vol_dict['nginx_var_www_html']['path_h']
+- name: "Create dict from nginxdc_ext_volumes"
+  set_fact:
+    nginxdc_fact_vol_dict: "{{ nginxdc_fact_vol_dict|default({}) | combine( {item.name: {'path_c':item.path_c, 'path_h':item.path_h} } ) }}"
+  loop: "{{ nginxdc_ext_volumes }}"
+  tags:
+    - nginxdc-compose-cfg
+    - nginxdc-volumes
+    - nginxdc-selfsigned
+    - nginxdc-dhparams
+    - nginxdc-le
 
 - name: "Create docker compose file from template"
   template:
@@ -63,9 +42,9 @@
     dest: "{{ nginxdc_compose_cfg_dir }}/nginx/nginx.conf"
   tags: nginxdc-nginx-cfg
 
-- name: "Block: disable existing nginx site config"
+- name: "Disable existing nginx site config"
   block:
-    - name: "Get list site config files"
+    - name: "Get list of existing site config files"
       find:
         paths: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d"
         patterns: "*.conf"
@@ -77,114 +56,117 @@
       loop: "{{ fi.files }}"
   tags: nginxdc-nginx-site-cfg-remove
 
-- name: "Create temporal nginx sites configuration"
-  template:
-    src: "{{ item }}.j2"
-    dest: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
-  loop: "{{ nginxdc_nginx_conf_d_temp_templates }}"
-  tags: nginxdc-nginx-temp-site-cfg
-
-- name: "Block: volumes"
+- name: "Configure volumes"
   block:
     - name: "Check if paths used for docker volume exist"
       stat:
-        path: "{{ item.path }}"
+        path: "{{ item.path_h }}"
       register: st
       loop: "{{ nginxdc_ext_volumes }}"
 
     - name: "Create paths used for docker volumes if needed"
       file:
-        path: "{{ item.item.path }}"
+        path: "{{ item.item.path_h }}"
         state: "directory"
-        owner: "{{ nginxdc_fact_uids_dict['nginx'] }}"
         mode: '755'
       when: item.stat.exists is not defined or not(item.stat.exists)
       loop: "{{ st.results }}"
 
     # Create docker volumes as bind mounts
-    # (i.e., all directories created beforehand, 
-    #  all  NFS/CIFS/etc volumes mounted beforehand )
-    - name: "Create docker volumes"
+    # (i.e., all directories need to be created beforehand, 
+    #  all  NFS/CIFS/etc volumes need to be mounted beforehand )
+    - name: "Create docker volumes (bind mounts)"
       docker_volume:
         name: "{{ item.name }}"
         driver_options:
           type: "none"
           o: "bind"
-          device: "{{ item.path }}"
+          device: "{{ item.path_h }}"
       loop: "{{ nginxdc_ext_volumes }}"
   tags: nginxdc-volumes
 
-- name: "create self signed certificate using openssl certbot container"
+- name: "create self signed certificate using openssl"
   shell:
     cmd: |
-      docker-compose run --rm --entrypoint "\
-      /usr/bin/openssl req -x509 -nodes -newkey rsa:2014 -days 3650 \
-      -keyout '/etc/ssl/selfsigned/selfsigned.pem' \
-      -out '/etc/ssl/selfsigned/selfsigned.crt' \
-      -subj '/CN=localhost'" certbot
-    chdir: "{{ nginxdc_compose_cfg_dir }}"
+      openssl req -x509 -nodes -newkey rsa:2014 -days 3650 \
+      -keyout '{{ nginxdc_fact_vol_dict['nginx_etc_ssl_sslgen']['path_h'] }}/selfsigned-privkey.pem' \
+      -out '{{ nginxdc_fact_vol_dict['nginx_etc_ssl_sslgen']['path_h'] }}/selfsigned-cert.pem' \
+      -subj '/CN=localhost'
   tags: nginxdc-selfsigned
 
-- name: "Get LE certs using certbot"
+- name: "create dhparam file using openssl (takes some time)"
   shell:
     cmd: |
-      docker-compose run --rm --entrypoint "\
-      certbot certonly \
-      --webroot -w /var/www/html \
-      --email {{ nginxdc_le_email }} --no-eff-email \
-      -d {{ nginxdc_le_domains|join(',') }} \
-      --agree-tos {{ '--staging' if (nginxdc_le_staging | bool) else '' }} \
-      --force-renewal" certbot
-    chdir: "{{ nginxdc_compose_cfg_dir }}"
+      /usr/bin/openssl dhparam -out {{ nginxdc_fact_vol_dict['nginx_etc_ssl_sslgen']['path_h'] }}/dhparam.pem \
+      4096
+    creates: "{{ nginxdc_fact_vol_dict['nginx_etc_ssl_sslgen']['path_h'] }}/dhparam.pem"
+  tags: nginxdc-dhparams
+
+- name: "Check if LE certs already exists"
+  stat:
+    path: "{{ nginxdc_fact_vol_dict['nginx_etc_letsencrypt']['path_h'] }}/live/{{ nginxdc_le_domains[0] }}/fullchain.pem"
+  register: st_le
+  when: 
+    - nginxdc_le_enable | bool
   tags: nginxdc-le
 
-- name: "Remove temporal nginx sites configuration"
-  file:
-    path: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
-    state: absent
-  loop: "{{ nginxdc_nginx_conf_d_temp_templates }}"
-  tags: nginxdc-nginx-temp-site-cfg-remove
+- name: "certbot tasks"
+  block:
+    - name: "Create temporal nginx site configuration to get LE certs"
+      template:
+        src: "{{ item }}.j2"
+        dest: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
+      loop: "{{ nginxdc_nginx_conf_d_temp_templates }}"
+      tags: nginxdc-nginx-temp-site-cfg
 
-- name: "Create final nginx site configuration from templates"
+    - name: "Restart nginx"
+      docker_compose:
+        project_src: "{{ nginxdc_compose_cfg_dir }}"
+        services: 
+          - nginx
+        state: present
+        restarted: yes
+      tags: nginxdc-compose-restart
+
+    # run with the '--force-renewal' option to prevent certbot
+    # stalling (i.e., asking for user input if a cert already exists)
+    - name: "Get LE certs using certbot"
+      shell:
+        cmd: |
+          docker-compose run --rm --entrypoint "\
+          certbot certonly \
+          --webroot -w {{ nginxdc_fact_vol_dict['nginx_var_www_html']['path_c'] }} \
+          --email {{ nginxdc_le_email }} --no-eff-email \
+          -d {{ nginxdc_le_domains|join(',') }} \
+          --agree-tos \
+          {{ '--staging' if (nginxdc_le_staging | bool) else '' }} \
+          --force-renewal \
+          {{ '--break-my-certs' if (nginxdc_le_break_my_certs | bool) else '' }}" \
+          certbot
+        chdir: "{{ nginxdc_compose_cfg_dir }}"
+
+    - name: "Remove temporal nginx sites configuration"
+      file:
+        path: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
+        state: absent
+      loop: "{{ nginxdc_nginx_conf_d_temp_templates }}"
+      tags: nginxdc-nginx-temp-site-cfg-remove
+  when: 
+    - nginxdc_le_enable | bool
+    - nginxdc_le_overwrite_existing_cert or st_le.stat.exists is not defined or not(st_le.stat.exists)
+  tags: nginxdc-le
+
+
+- name: "Create nginx site configuration from templates"
   template:
     src: "{{ item }}.j2"
     dest: "{{ nginxdc_compose_cfg_dir }}/nginx/conf.d/{{ item | basename }}"
   loop: "{{ nginxdc_nginx_conf_d_templates }}"
   tags: nginxdc-nginx-site-cfg-create
 
-# - name: "Restart nginx"
-#   docker_compose:
-#     project_src: "{{ nginxdc_compose_cfg_dir }}"
-#     services:
-#       - nginx
-#     state: present
-#     restarted: yes
-#   tags: nginxdc-nginx-restart
-
-- name: "Start all compose services"
+- name: "(Re-)start all compose services"
   docker_compose:
     project_src: "{{ nginxdc_compose_cfg_dir }}"
     state: present
     restarted: yes
   tags: nginxdc-compose-restart
-
-
-# - name: "Block: configure cron to renew LE certs"
-#   block:
-#     - name: "Create script to renew cert from template"
-#       template:
-#         src: "certbot_renew.sh.j2"
-#         dest: "{{ nginxdc_compose_cfg_dir }}/certbot_renew.sh"
-#         mode: "0755"
-
-#     - name: "Add crontab entry to call script to renew cert"
-#       cron:
-#         name: "certbot renew"
-#         minute: "0"
-#         hour: "23"
-#         day: "*"
-#         job: "{{ nginxdc_compose_cfg_dir }}/certbot_renew.sh"
-#   tags:
-#     - nginxdc-le
-#     - nginxdc-le-cron
-
