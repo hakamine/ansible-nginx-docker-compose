@@ -1,6 +1,0 @@
-#!/bin/bash
-
-COMPOSE="/usr/bin/docker-compose --no-ansi"
-
-cd {{ nginxdc_compose_cfg_dir }}
-$COMPOSE exec certbot renew && $COMPOSE kill -s SIGHUP nginx

@@ -12,22 +12,15 @@ nginxdc_compose_data_dir: "/var/compose/nginx"
 #  always be /etc/nginx/nginx.conf in the nginx container)
 nginxdc_nginx_conf_template: "nginx/nginx.conf"
 
-# templates for /etc/nginx.d/
+# site template(s) for /etc/nginx.d/
+# Default template is set up to use self-signed certificates
 # (to override, use a list of files with different path/names, target
 #  files will be copied to /etc/nginx/nginx.d/ using the basename )
 nginxdc_nginx_conf_d_templates:
     - "nginx/conf.d/default-tls-selfsigned.conf"
-  
-# temporal template, this is used to obtain LE certs
-nginxdc_nginx_conf_d_temp_templates:
-  - "nginx/conf.d/default-tls-selfsigned.conf"
 
-## template config parameters
-nginxdc_nginx_template_default_ssl_cert : "/etc/letsencrypt/live/example.com/fullchain.pem"
-nginxdc_nginx_template_default_ssl_cert_key : "/etc/letsencrypt/live/example.com/privkey.pem"
-
-
-# docker external volumes
+# docker external volumes used by containers
+# (this variable normally does not require to be changed)
 #     name: volume name
 #     path_h: volume path in host
 #     path_c: volume path in container
@@ -50,11 +43,13 @@ nginxdc_ext_volumes:
     path_h: "{{ nginxdc_compose_data_dir }}/var_lib_letsencrypt"
     path_c: "/var/lib/letsencrypt"
 
-## Let's Encrypt (LE)
+## Let's Encrypt (LE) related configuration
+
 # set to yes to configure nginx for Let's Encrypt
 #   (requires DNS entries for the server are set up beforehand) 
-#   default is no (deploy self-signed cert only)
+#   default is no (deploy and use self-signed cert only)
 nginxdc_le_enable: no
+
 # check if cert exists before running certbot
 #   - no(default): check for existing LE cert file,
 #         if it exists will not run certbot
@@ -62,15 +57,33 @@ nginxdc_le_enable: no
 #         will run certbot with --force-renewal option
 nginxdc_le_overwrite_existing_cert: no
 
+# temporal site template used to obtain LE certs
+# (this variable normally does not require to be changed)
+nginxdc_nginx_conf_d_temp_templates:
+  - "nginx/conf.d/default-tls-selfsigned.conf"
 
-# list of domains from which to obtain LE certs
-nginxdc_le_domains:
-    - www.example.com
-    - example.com
-# e-mail used for LE registration
-nginxdc_le_email: myemail@example.com
 # use certbot's --staging option (LE staging server)
 nginxdc_le_staging: no
+
 # use certbot's --break-my-certs option
 nginxdc_le_break_my_certs: no
 
+# list of domains from which to obtain LE certs
+# (no default provided, assign a value in playbook/host_vars if using LE)
+# Example:
+# nginxdc_le_domains:
+#    - www.example.com
+#    - example.com
+
+# e-mail used for LE registration
+# (no default provided, assign a value in playbook/host_vars if using LE)
+# Example:
+# nginxdc_le_email: myemail@example.com
+
+# in addition to the variables above, if using LE, 
+# set nginxdc_nginx_conf_d_templates and related template variables
+# appropriately, for example:
+# nginxdc_nginx_conf_d_templates:
+#   - "nginx/conf.d/default-tls.conf"
+# nginxdc_nginx_template_default_ssl_cert : "/etc/letsencrypt/live/example.com/fullchain.pem"
+# nginxdc_nginx_template_default_ssl_cert_key : "/etc/letsencrypt/live/example.com/privkey.pem"
