@@ -24,7 +24,7 @@ Example Playbook
 ----------------
 
 To deploy nginx with a self-signed certificate (role default):
-```
+```yaml
 - hosts: 
     - myhost.com
   roles:
@@ -36,7 +36,7 @@ To deploy nginx with a self-signed certificate (role default):
 
 To deploy nginx with Let's Encrypt (DNS for the host must be
 configured beforehand):
-```
+```yaml
 - hosts: 
     - myhost.com
   vars:
